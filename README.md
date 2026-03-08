@@ -1,6 +1,10 @@
 # openclaw-crm
 
-[![CI](https://github.com/lustsazeus-lab/openclaw-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/lustsazeus-lab/openclaw-crm/actions/workflows/ci.yml)
+<<<<<<< HEAD
+[![CI](https://github.com/ChinchillaEnterprises/openclaw-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/ChinchillaEnterprises/openclaw-crm/actions/workflows/ci.yml)
+=======
+[![CI](https://github.com/ChinchillaEnterprises/openclaw-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/ChinchillaEnterprises/openclaw-crm/actions/workflows/ci.yml)
+>>>>>>> 49ab704 (feat: Add GitHub Actions CI pipeline (closes #5))
 
 Lightweight CRM pipeline tracker backed by Google Sheets. Built for small agencies and solo operators who want pipeline visibility without paying for Salesforce.
 
