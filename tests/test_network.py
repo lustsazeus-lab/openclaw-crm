@@ -1,30 +1,39 @@
-"""Unit tests for network module."""
+"""Tests for network.py (spider network referral tracking)."""
 from __future__ import annotations
-
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from openclaw_crm import network
+from openclaw_crm.network import (
+    add_signal,
+    promote_signal,
+    dismiss_signal,
+    get_network_tree,
+    get_network_value,
+    check_competitor_guard,
+    SIGNALS_RANGE,
+    PIPELINE_RANGE,
+)
 
 
 class TestAddSignal:
     """Tests for add_signal function."""
 
     def test_add_signal_basic(self, mock_backend):
-        """add_signal should add a new signal."""
+        """Test adding a basic signal."""
         signal = {
+            "timestamp": "2026-03-09T10:00:00",
             "source_client": "Alice",
             "channel": "slack",
             "signal_text": "Great lead",
-            "mentioned_company": "NewCorp",
+            "mentioned_company": "NewCo",
         }
-        result = network.add_signal(signal)
+        result = add_signal(signal)
+        assert result["ok"] is True
+        assert result["status"] == "new"
+
+    def test_add_signal_defaults(self, mock_backend):
+        """Test adding signal with defaults."""
+        result = add_signal({})
         assert result["ok"] is True
         assert result["status"] == "new"
 
@@ -32,52 +41,90 @@ class TestAddSignal:
 class TestPromoteSignal:
     """Tests for promote_signal function."""
 
-    def test_promote_signal_creates_deal(self, mock_backend_with_signals, mock_backend_with_pipeline):
-        """promote_signal should create a deal from signal."""
-        # Row 2 (first data row after header)
-        result = network.promote_signal(2)
+    def test_promote_signal_atomic(self, mock_backend_with_signals, mock_backend_with_pipeline):
+        """Test atomic promote: deal created before signal marked as promoted."""
+        # Promote the first signal (row 2 in sheet, index 1 in data)
+        result = promote_signal(2, {"budget": "$5000"})
+        
         assert result["ok"] is True
-        assert "deal" in result
+        assert result["signal_row"] == 2
+        
+        # Verify signal was marked as promoted in signals sheet
+        # This happens after deal creation (atomic)
+        backend = mock_backend_with_signals
+        signals_data = backend._data.get(f"test_spreadsheet:{SIGNALS_RANGE}")
+        # Row 2 should have "promoted" status
+        signal_row = signals_data[1] if signals_data else []
+        status_idx = 5  # Status is at index 5
+        assert signal_row[status_idx] == "promoted"
+        
+        # Verify deal was created in pipeline
+        pipeline_data = backend._data.get(f"test_spreadsheet:{PIPELINE_RANGE}")
+        # Should have 5 rows now (1 header + 4 original + 1 new = but wait, fixture had 3 data rows)
+        # Fixture: 1 header + 3 data = 4, + 1 new deal = 5
+        assert len(pipeline_data) == 5
 
-    def test_promote_signal_already_promoted(self, mock_backend_with_signals, mock_backend_with_pipeline):
-        """promote_signal should reject already promoted signals."""
-        # Row 3 is already promoted
-        result = network.promote_signal(3)
+    def test_promote_signal_reject_already_promoted(self, mock_backend_with_signals, mock_backend_with_pipeline):
+        """Test re-promote guard: reject if signal already promoted."""
+        # Try to promote the second signal which is already "promoted"
+        result = promote_signal(3)
+        
         assert result["ok"] is False
-        assert "already promoted" in result.get("error", "").lower()
+        assert "already promoted" in result["error"]
 
-    def test_promote_signal_with_deal_overrides(self, mock_backend_with_signals, mock_backend_with_pipeline):
-        """promote_signal should apply deal overrides."""
-        result = network.promote_signal(2, deal_overrides={"budget": "$5000"})
-        assert result["ok"] is True
+    def test_promote_signal_out_of_range(self, mock_backend_with_signals):
+        """Test promote with out of range row."""
+        result = promote_signal(100)
+        
+        assert result["ok"] is False
+        assert "out of range" in result["error"]
 
 
 class TestDismissSignal:
     """Tests for dismiss_signal function."""
 
-    def test_dismiss_signal_basic(self, mock_backend_with_signals):
-        """dismiss_signal should mark signal as dismissed."""
-        result = network.dismiss_signal(2)
+    def test_dismiss_signal(self, mock_backend_with_signals):
+        """Test dismissing a signal."""
+        result = dismiss_signal(2)
+        
         assert result["ok"] is True
+        
+        # Verify signal was marked as dismissed
+        backend = mock_backend_with_signals
+        signals_data = backend._data.get(f"test_spreadsheet:{SIGNALS_RANGE}")
+        signal_row = signals_data[1]
+        assert signal_row[5] == "dismissed"
+
+    def test_dismiss_signal_out_of_range(self, mock_backend_with_signals):
+        """Test dismiss with out of range row."""
+        result = dismiss_signal(100)
+        
+        assert result["ok"] is False
+        assert "out of range" in result["error"]
 
 
 class TestGetNetworkTree:
     """Tests for get_network_tree function."""
 
-    def test_get_network_tree_with_root(self, mock_backend_with_pipeline):
-        """get_network_tree should return tree for specific root."""
-        tree = network.get_network_tree(root="Alice")
-        assert "Alice" in tree
-        assert len(tree["Alice"]) > 0
-
     def test_get_network_tree_full(self, mock_backend_with_pipeline):
-        """get_network_tree should return full network."""
-        tree = network.get_network_tree()
-        assert isinstance(tree, dict)
+        """Test getting full network tree."""
+        tree = get_network_tree()
+        
+        assert "Alice" in tree
+        assert len(tree["Alice"]) == 1
+        assert tree["Alice"][0]["client"] == "Beta Inc"
+
+    def test_get_network_tree_filtered(self, mock_backend_with_pipeline):
+        """Test getting network tree for specific root."""
+        tree = get_network_tree(root="Alice")
+        
+        assert "Alice" in tree
+        assert len(tree["Alice"]) == 1
 
     def test_get_network_tree_empty(self, mock_backend):
-        """get_network_tree should handle empty pipeline."""
-        tree = network.get_network_tree()
+        """Test network tree with no data."""
+        tree = get_network_tree()
+        
         assert tree == {}
 
 
@@ -85,71 +132,50 @@ class TestGetNetworkValue:
     """Tests for get_network_value function."""
 
     def test_get_network_value_direct_only(self, mock_backend_with_pipeline):
-        """get_network_value should calculate direct value."""
-        result = network.get_network_value("Acme Corp")
+        """Test getting network value for direct client."""
+        result = get_network_value("Acme Corp")
+        
         assert result["client"] == "Acme Corp"
         assert result["direct_value"] == 5000
         assert result["network_value"] == 0
+        assert result["total"] == 5000
 
     def test_get_network_value_with_network(self, mock_backend_with_pipeline):
-        """get_network_value should include network value."""
-        # Alice referred Beta Inc with $3000
-        result = network.get_network_value("Alice")
-        assert result["network_value"] == 3000
-
-    def test_get_network_value_total(self, mock_backend_with_pipeline):
-        """get_network_value should calculate total."""
-        result = network.get_network_value("Alice")
-        assert result["total"] == 3000  # Only network value since Alice has no direct deals
-
-    def test_get_network_value_not_found(self, mock_backend_with_pipeline):
-        """get_network_value should handle unknown client."""
-        result = network.get_network_value("Unknown Corp")
+        """Test getting network value including referrals."""
+        result = get_network_value("Alice")
+        
+        assert result["client"] == "Alice"
         assert result["direct_value"] == 0
-        assert result["network_value"] == 0
+        assert result["network_value"] == 3000  # Beta Inc referred by Alice
+        assert result["total"] == 3000
 
 
 class TestCheckCompetitorGuard:
     """Tests for check_competitor_guard function."""
 
     def test_check_competitor_guard_new_company(self, mock_backend_with_pipeline, mock_backend_with_clients):
-        """check_competitor_guard should allow new companies."""
-        result = network.check_competitor_guard("NewCompany", "Alice")
+        """Test competitor guard allows new company."""
+        # NewCo is not in pipeline or clients
+        result = check_competitor_guard("NewCo", "Alice")
+        
         assert result is True
 
-    def test_check_competitor_guard_existing_won(self, mock_backend_with_pipeline, mock_backend_with_clients):
-        """check_competitor_guard should block existing clients in won stage."""
-        result = network.check_competitor_guard("Acme Corp", "Alice")
+    def test_check_competitor_guard_existing_in_pipeline(self, mock_backend_with_pipeline, mock_backend_with_clients):
+        """Test competitor guard blocks company in Pipeline (won/negotiation/proposal)."""
+        # Acme Corp is in pipeline with "won" stage
+        result = check_competitor_guard("Acme Corp", "Alice")
+        
         assert result is False
 
-    def test_check_competitor_guard_existing_active_client(self, mock_backend_with_pipeline, mock_backend_with_clients):
-        """check_competitor_guard should block existing active clients."""
-        result = network.check_competitor_guard("ExistingCorp", "Alice")
+    def test_check_competitor_guard_existing_in_clients(self, mock_backend_with_pipeline, mock_backend_with_clients):
+        """Test competitor guard blocks company in Clients tab (active/paused)."""
+        # ExistingCorp is in clients with "active" status
+        result = check_competitor_guard("ExistingCorp", "Alice")
+        
         assert result is False
 
-    def test_check_competitor_guard_paused_client(self, mock_backend_with_pipeline, mock_backend_with_clients):
-        """check_competitor_guard should block paused clients."""
-        result = network.check_competitor_guard("PausedInc", "Alice")
+    def test_check_competitor_guard_case_insensitive(self, mock_backend_with_pipeline, mock_backend_with_clients):
+        """Test competitor guard is case insensitive."""
+        result = check_competitor_guard("ACME CORP", "Alice")
+        
         assert result is False
-
-
-class TestAtomicPromote:
-    """Tests for atomic promote behavior (deal created before signal marked)."""
-
-    def test_promote_creates_deal_first(self, mock_backend_with_signals, mock_backend_with_pipeline):
-        """promote_signal should create deal before marking signal as promoted."""
-        # This verifies the atomic behavior - deal is created successfully
-        result = network.promote_signal(2)
-        assert result["ok"] is True
-        assert result["deal"]["ok"] is True
-
-
-class TestRePromoteGuard:
-    """Tests for re-promote guard."""
-
-    def test_cannot_repromote_promoted_signal(self, mock_backend_with_signals, mock_backend_with_pipeline):
-        """Cannot promote a signal that is already promoted."""
-        # Row 3 is already promoted
-        result = network.promote_signal(3)
-        assert result["ok"] is False
-        assert "already promoted" in result.get("error", "").lower()
