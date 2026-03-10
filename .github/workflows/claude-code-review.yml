@@ -1,0 +1,52 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR TITLE: ${{ github.event.pull_request.title }}
+            PR AUTHOR: ${{ github.event.pull_request.user.login }}
+
+            Review this pull request. Read CLAUDE.md and REVIEW.md (if present) for project conventions.
+
+            Focus areas (in priority order):
+            1. BUGS — Logic errors, off-by-one, null/undefined, race conditions
+            2. SECURITY — Injection, auth bypass, secret exposure, OWASP top 10
+            3. BREAKING CHANGES — API contracts, schema changes, backwards compat
+            4. PERFORMANCE — N+1 queries, unnecessary re-renders, missing indexes
+            5. CONVENTIONS — Violations of CLAUDE.md or REVIEW.md rules
+
+            For each finding, classify severity:
+            - 🔴 BUG: Fix before merging
+            - 🟡 NIT: Minor, not blocking
+            - 🟣 PRE-EXISTING: Bug already in codebase, not introduced by this PR
+
+            If the PR is clean, say so briefly. Don't manufacture issues.
+
+            Use `gh pr review` to submit your review with inline comments where possible.
+            Use `gh pr comment` for the summary.
+
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr review:*),Read,Glob,Grep"'
