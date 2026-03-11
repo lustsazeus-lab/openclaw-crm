@@ -103,6 +103,32 @@ go install github.com/nicholasgasior/gws@latest
 gws auth login
 ```
 
+## Airtable Backend
+
+Use Airtable instead of Google Sheets:
+
+```bash
+pip install "openclaw-crm[airtable]"
+```
+
+Set your Airtable credentials:
+
+```bash
+export AIRTABLE_API_TOKEN="your_personal_access_token"
+export AIRTABLE_BASE_ID="appXXXXXXXXXXXXXX"
+```
+
+Create an Airtable base with tables named **Pipeline** and **Network Signals**, with columns matching the spreadsheet headers above.
+
+Then configure the backend:
+
+```python
+from openclaw_crm.backends.airtable_backend import AirtableBackend
+from openclaw_crm.sheets import set_backend
+
+set_backend(AirtableBackend())
+```
+
 ### Custom Backend
 
 Implement the `SheetsBackend` interface to use any Google Sheets library:
