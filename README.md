@@ -133,6 +133,29 @@ class GspreadBackend(SheetsBackend):
 set_backend(GspreadBackend("credentials.json"))
 ```
 
+### Built-in Gspread Backend
+
+openclaw-crm now includes a production-ready `GspreadBackend`! Install with:
+
+```bash
+pip install openclaw-crm[gspread]
+```
+
+Then use it in your code:
+
+```python
+from openclaw_crm.backends import GspreadBackend
+from openclaw_crm.sheets import set_backend
+
+# Initialize with optional service account file
+backend = GspreadBackend(service_account_file="/path/to/service_account.json")
+
+# Set as the default backend
+set_backend(backend)
+```
+
+Or use environment or config to select backend. See `src/openclaw_crm/backends/gspread_backend.py` for full API.
+
 ## 🤖 AI Agents Welcome!
 
 This repository is **AI agent-friendly**! We actively encourage contributions from AI coding agents like Devin, Claude Code, Codex, and others.
